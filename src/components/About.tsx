@@ -1,29 +1,29 @@
-'use client'
+"use client";
 
-import React from 'react'
-import { CheckCircle, Users, Building, TrendingUp } from 'lucide-react'
+import React from "react";
+import { CheckCircle, Users, Building, TrendingUp } from "lucide-react";
 
 const About = () => {
-  const years = process.env.NEXT_PUBLIC_YEARS_EXPERIENCE || '5+'
-  const clients = process.env.NEXT_PUBLIC_HAPPY_CLIENTS || '150+'
-  const properties = process.env.NEXT_PUBLIC_PROPERTIES || '30+'
-  const awards = process.env.NEXT_PUBLIC_AWARDS || '5+'
+  const years = process.env.NEXT_PUBLIC_YEARS_EXPERIENCE || "5+";
+  const clients = process.env.NEXT_PUBLIC_HAPPY_CLIENTS || "150+";
+  const properties = process.env.NEXT_PUBLIC_PROPERTIES || "30+";
+  const awards = process.env.NEXT_PUBLIC_AWARDS || "5+";
 
   const stats = [
-    { value: years, label: 'Лет опыта' },
-    { value: clients, label: 'Довольных клиентов' },
-    { value: properties, label: 'Объектов в портфеле' },
-    { value: awards, label: 'Наград получено' },
-  ]
+    { value: years, label: "Лет опыта" },
+    { value: clients, label: "Довольных клиентов" },
+    { value: properties, label: "Объектов в портфеле" },
+    { value: awards, label: "Наград получено" },
+  ];
 
   const achievements = [
-    'Индивидуальный подход к каждому клиенту',
-    'Только проверенные и качественные объекты',
-    'Гарантия безопасности и комфорта',
-    'Профессиональное управление недвижимостью',
-    'Круглосуточная поддержка гостей',
-    'Гибкие условия аренды',
-  ]
+    "Индивидуальный подход к каждому клиенту",
+    "Только проверенные и качественные объекты",
+    "Гарантия безопасности и комфорта",
+    "Профессиональное управление недвижимостью",
+    "Круглосуточная поддержка гостей",
+    "Гибкие условия аренды",
+  ];
 
   return (
     <section id="about" className="section-padding bg-gray-50">
@@ -35,11 +35,11 @@ const About = () => {
               Ваш надежный партнер в аренде жилья
             </h2>
             <p className="text-lg text-gray-600 mb-8 leading-relaxed">
-              Мы специализируемся на краткосрочной аренде качественного жилья в лучших 
-              районах города. Наша команда тщательно отбирает каждый объект, чтобы 
-              обеспечить вам максимальный комфорт и безопасность.
+              Мы специализируемся на краткосрочной аренде качественного жилья в
+              лучших районах города. Наша команда тщательно отбирает каждый
+              объект, чтобы обеспечить вам максимальный комфорт и безопасность.
             </p>
-            
+
             <div className="grid grid-cols-2 gap-6 mb-8">
               {stats.map((stat, index) => (
                 <div key={index} className="text-center lg:text-left">
@@ -95,7 +95,9 @@ const About = () => {
               <div className="flex items-center mb-2">
                 <Building className="h-8 w-8 text-primary-600 mr-3" />
                 <div>
-                  <div className="font-semibold text-gray-900">Лучший сервис 2024</div>
+                  <div className="font-semibold text-gray-900">
+                    Лучший сервис 2024
+                  </div>
                   <div className="text-sm text-gray-600">Награда клиентов</div>
                 </div>
               </div>
@@ -104,7 +106,7 @@ const About = () => {
         </div>
       </div>
     </section>
-  )
-}
+  );
+};
 
-export default About
+export default About;
