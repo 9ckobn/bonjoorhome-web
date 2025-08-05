@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import emailjs from "@emailjs/browser";
 import {
   MapPin,
   Star,
@@ -10,9 +11,14 @@ import {
   ChevronRight,
   Phone,
   X,
+  Loader2,
 } from "lucide-react";
 import { RentPeriod, getRussianMonthNumber } from "@/utils/csvParser";
+import { checkRateLimit } from "@/utils/clientRateLimit";
+import { useNotification } from "@/utils/useNotification";
+import { formatPhoneNumber, validatePhoneNumber } from "@/utils/phoneFormatter";
 import DateRangePicker from "./DateRangePicker";
+import NotificationModal from "./NotificationModal";
 
 interface Property {
   id: number;
@@ -44,7 +50,21 @@ const ContactModal: React.FC<ContactModalProps> = ({
   property,
   rentPeriods = [],
 }) => {
-  const formEmail = process.env.NEXT_PUBLIC_FORM_EMAIL || "9ckobne2@gmail.com";
+  const serviceId =
+    process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID || "service_your_id";
+  const templateId =
+    process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_BOOKING || "template_booking";
+  const publicKey =
+    process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY || "your_public_key";
+
+  const {
+    notification,
+    isOpen: notificationOpen,
+    showSuccess,
+    showError,
+    showWarning,
+    hideNotification,
+  } = useNotification();
 
   const [formData, setFormData] = useState({
     name: "",
@@ -59,15 +79,14 @@ const ContactModal: React.FC<ContactModalProps> = ({
     endDate: null,
   });
   const [isClosing, setIsClosing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Convert rent periods to unavailable dates for this property
   const getUnavailableDates = (): Date[] => {
     if (!property) return [];
 
     const currentYear = new Date().getFullYear();
     const unavailableDates: Date[] = [];
 
-    // Process all rent periods for this property (not just current month)
     rentPeriods.forEach((period) => {
       const periodMonthNumber = getRussianMonthNumber(period.month);
       if (periodMonthNumber) {
@@ -111,84 +130,96 @@ const ContactModal: React.FC<ContactModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validation
-    if (
-      !formData.name.trim() ||
-      !formData.phone.trim() ||
-      !formData.message.trim()
-    ) {
-      alert("Пожалуйста, заполните все обязательные поля");
+    // Validation for required fields
+    if (!formData.name.trim()) {
+      showError("Заполните поле", "Пожалуйста, укажите ваше имя");
       return;
     }
 
+    if (!formData.phone.trim()) {
+      showError("Заполните поле", "Пожалуйста, укажите номер телефона");
+      return;
+    }
+
+    // Validate phone number format
+    const phoneValidation = validatePhoneNumber(formData.phone);
+    if (!phoneValidation.isValid) {
+      showError(
+        "Неверный номер телефона",
+        phoneValidation.error || "Проверьте правильность номера телефона"
+      );
+      return;
+    }
+
+    // Check if dates are selected
+    if (!dateRange.startDate || !dateRange.endDate) {
+      showError("Выберите даты", "Пожалуйста, укажите даты заезда и выезда");
+      return;
+    }
+
+    // Check rate limiting
+    const rateLimitCheck = checkRateLimit();
+    if (!rateLimitCheck.allowed) {
+      showError("Упс! Что-то случилось =(", "Попробуйте попозже");
+      return;
+    }
+
+    setIsSubmitting(true); // Start loading
+
     try {
-      // Prepare form data for FormSubmit.co
-      const submitData = new FormData();
-      submitData.append("type", "Заявка на бронирование");
-      submitData.append("propertyId", property.id.toString());
-      submitData.append("property", property.address);
-      submitData.append("name", formData.name);
-      submitData.append("phone", formData.phone);
-      submitData.append("message", formData.message);
+      const templateParams = {
+        from_name: formData.name,
+        from_phone: formData.phone,
+        message: formData.message,
+        property_title: property?.title || "Не указано",
+        property_address: property?.address || "Не указано",
+        property_id: property?.id || "Не указано",
+        checkin_date:
+          dateRange.startDate?.toLocaleDateString("ru-RU") || "Не указано",
+        checkout_date:
+          dateRange.endDate?.toLocaleDateString("ru-RU") || "Не указано",
+        timestamp: new Date().toLocaleString("ru-RU"),
+      };
 
-      if (dateRange.startDate) {
-        submitData.append(
-          "checkIn",
-          dateRange.startDate.toLocaleDateString("ru-RU")
-        );
-      }
-      if (dateRange.endDate) {
-        submitData.append(
-          "checkOut",
-          dateRange.endDate.toLocaleDateString("ru-RU")
-        );
-      }
+      console.log("Template params:", templateParams);
 
-      submitData.append("timestamp", new Date().toLocaleString("ru-RU"));
-      submitData.append(
-        "_subject",
-        `Новая заявка на бронирование - ${property.title}`
+      await emailjs.send(serviceId, templateId, templateParams, publicKey);
+
+      showSuccess(
+        "Заявка отправлена!",
+        "Спасибо! Ваша заявка отправлена. Мы свяжемся с вами в ближайшее время.",
+        () => {
+          handleClose();
+          setFormData({
+            name: "",
+            phone: "",
+            message: "",
+          });
+          setDateRange({
+            startDate: null,
+            endDate: null,
+          });
+          setIsSubmitting(false);
+        }
       );
-      submitData.append("_template", "table");
-      submitData.append(
-        "_subject",
-        `Новая заявка на бронирование - ${property.title}`
-      );
-      submitData.append("_template", "table");
-
-      // Send to FormSubmit.co using environment variable
-      const response = await fetch(`https://formsubmit.co/${formEmail}`, {
-        method: "POST",
-        body: submitData,
-      });
-
-      if (response.ok) {
-        alert(
-          "Спасибо! Ваша заявка отправлена. Мы свяжемся с вами в ближайшее время."
-        );
-        handleClose();
-        setFormData({
-          name: "",
-          phone: "",
-          message: "",
-        });
-        setDateRange({
-          startDate: null,
-          endDate: null,
-        });
-      } else {
-        throw new Error("Ошибка отправки формы");
-      }
     } catch (error) {
       console.error("Error processing booking request:", error);
-      alert("Произошла ошибка при отправке заявки. Попробуйте позже.");
+      showError("Упс! Что-то случилось =(", "Попробуйте попозже");
+      setIsSubmitting(false); // Stop loading on error
     }
   };
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+
+    if (name === "phone") {
+      const formattedPhone = formatPhoneNumber(value);
+      setFormData({ ...formData, [name]: formattedPhone });
+    } else {
+      setFormData({ ...formData, [name]: value });
+    }
   };
 
   return (
@@ -248,7 +279,7 @@ const ContactModal: React.FC<ContactModalProps> = ({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Даты проживания
+                Даты проживания <span className="text-red-500">*</span>
               </label>
               <DateRangePicker
                 value={dateRange}
@@ -261,16 +292,15 @@ const ContactModal: React.FC<ContactModalProps> = ({
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Комментарий <span className="text-red-500">*</span>
+                Комментарий
               </label>
               <textarea
                 name="message"
                 value={formData.message}
                 onChange={handleChange}
-                required
                 rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500 transition-colors"
-                placeholder="Расскажите о ваших пожеланиях..."
+                placeholder="Дополнительные пожелания (необязательно)..."
               />
             </div>
 
@@ -281,12 +311,29 @@ const ContactModal: React.FC<ContactModalProps> = ({
               </div>
             </div>
 
-            <button type="submit" className="btn-primary w-full">
-              Отправить заявку
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className={`btn-primary w-full flex items-center justify-center gap-2 ${
+                isSubmitting ? "opacity-75 cursor-not-allowed" : ""
+              }`}
+            >
+              {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+              {isSubmitting ? "Отправляем..." : "Отправить заявку"}
             </button>
           </form>
         </div>
       </div>
+
+      {notification && (
+        <NotificationModal
+          isOpen={notificationOpen}
+          onClose={hideNotification}
+          type={notification.type}
+          title={notification.title}
+          message={notification.message}
+        />
+      )}
     </div>
   );
 };
@@ -342,7 +389,6 @@ const PropertyCard: React.FC<{
               <ChevronRight className="h-5 w-5" />
             </button>
 
-            {/* Image indicators */}
             <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex space-x-1">
               {property.images.map((_, index) => (
                 <div
@@ -356,7 +402,6 @@ const PropertyCard: React.FC<{
           </>
         )}
 
-        {/* Availability status */}
         <div className="absolute top-2 left-2">
           <span
             className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -369,14 +414,12 @@ const PropertyCard: React.FC<{
           </span>
         </div>
 
-        {/* Rating */}
         <div className="absolute top-2 right-2 bg-white/90 rounded-full px-2 py-1 flex items-center">
           <Star className="h-3 w-3 text-yellow-400 fill-current mr-1" />
           <span className="text-xs font-medium">{property.rating}</span>
         </div>
       </div>
 
-      {/* Content */}
       <div className="p-4">
         <div className="flex justify-between items-start mb-2">
           <div>
@@ -409,7 +452,6 @@ const PropertyCard: React.FC<{
           {property.description}
         </p>
 
-        {/* Amenities */}
         <div className="flex flex-wrap gap-1 mb-4">
           {property.amenities.slice(0, 3).map((amenity, index) => (
             <span
@@ -463,7 +505,6 @@ const Properties: React.FC<PropertiesProps> = ({ rentData }) => {
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
 
-  // Function to check if a property is currently rented
   const isPropertyRented = (propertyId: number): boolean => {
     const currentMonth = new Date().getMonth() + 1;
     const currentDay = new Date().getDate();
@@ -471,14 +512,12 @@ const Properties: React.FC<PropertiesProps> = ({ rentData }) => {
     const propertyRentPeriods = rentData.propertyRentData[propertyId] || [];
 
     return propertyRentPeriods.some((period) => {
-      // Check if the period is for the current month using the utility function
       const periodMonthNumber = getRussianMonthNumber(period.month);
 
       if (periodMonthNumber !== currentMonth) {
         return false;
       }
 
-      // Check if current day falls within the rent period
       return currentDay >= period.startDay && currentDay <= period.endDay;
     });
   };
@@ -531,7 +570,6 @@ const Properties: React.FC<PropertiesProps> = ({ rentData }) => {
   return (
     <section id="properties" className="section-padding bg-white">
       <div className="container-custom">
-        {/* Section Header */}
         <div className="text-center mb-12">
           <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
             Варианты аренды
@@ -541,7 +579,6 @@ const Properties: React.FC<PropertiesProps> = ({ rentData }) => {
           </p>
         </div>
 
-        {/* Filters */}
         <div className="flex flex-wrap justify-center gap-4 mb-8">
           <button
             onClick={() => setFilter("all")}
@@ -595,7 +632,6 @@ const Properties: React.FC<PropertiesProps> = ({ rentData }) => {
           </button>
         </div>
 
-        {/* Properties Grid */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredProperties.map((property) => (
             <PropertyCard
@@ -616,7 +652,6 @@ const Properties: React.FC<PropertiesProps> = ({ rentData }) => {
           </div>
         )}
 
-        {/* Contact Modal */}
         <ContactModal
           isOpen={isModalOpen}
           onClose={() => setIsModalOpen(false)}

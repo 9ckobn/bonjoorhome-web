@@ -1,19 +1,39 @@
 "use client";
 
 import React, { useState } from "react";
-import { Mail, Phone } from "lucide-react";
+import emailjs from "@emailjs/browser";
+import { Mail, Phone, Loader2 } from "lucide-react";
 import { makePhoneCall } from "../utils/helpers";
+import { checkRateLimit } from "@/utils/clientRateLimit";
+import { useNotification } from "@/utils/useNotification";
+import { formatPhoneNumber, validatePhoneNumber } from "@/utils/phoneFormatter";
 import DateRangePicker from "./DateRangePicker";
+import NotificationModal from "./NotificationModal";
 
 const Contact = () => {
   const phoneNumber =
     process.env.NEXT_PUBLIC_PHONE_NUMBER || "+7 (999) 123-45-67";
   const email = process.env.NEXT_PUBLIC_EMAIL || "ponipolos@mail.ru";
-  const formEmail = process.env.NEXT_PUBLIC_FORM_EMAIL || "9ckobne2@gmail.com";
   const address =
     process.env.NEXT_PUBLIC_ADDRESS || "г. Москва, ул. Примерная, д. 123";
   const workHours =
     process.env.NEXT_PUBLIC_WORK_HOURS || "Ежедневно с 9:00 до 21:00";
+
+  const serviceId =
+    process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID || "service_your_id";
+  const templateId =
+    process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_CONTACT || "template_contact";
+  const publicKey =
+    process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY || "your_public_key";
+
+  const {
+    notification,
+    isOpen: notificationOpen,
+    showSuccess,
+    showError,
+    showWarning,
+    hideNotification,
+  } = useNotification();
 
   const [formData, setFormData] = useState({
     name: "",
@@ -34,70 +54,84 @@ const Contact = () => {
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    const { name, value } = e.target;
+
+    if (name === "phone") {
+      // Apply phone formatting
+      const formattedPhone = formatPhoneNumber(value);
+      setFormData({ ...formData, [name]: formattedPhone });
+    } else {
+      setFormData({ ...formData, [name]: value });
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validation
-    if (
-      !formData.name.trim() ||
-      !formData.phone.trim() ||
-      !formData.message.trim()
-    ) {
-      alert("Пожалуйста, заполните все обязательные поля");
+    // Validation for required fields
+    if (!formData.name.trim()) {
+      showError("Заполните поле", "Пожалуйста, укажите ваше имя");
+      return;
+    }
+
+    if (!formData.phone.trim()) {
+      showError("Заполните поле", "Пожалуйста, укажите номер телефона");
+      return;
+    }
+
+    // Validate phone number format
+    const phoneValidation = validatePhoneNumber(formData.phone);
+    if (!phoneValidation.isValid) {
+      showError(
+        "Неверный номер телефона",
+        phoneValidation.error || "Проверьте правильность номера телефона"
+      );
+      return;
+    }
+
+    if (!formData.message.trim()) {
+      showError("Заполните поле", "Пожалуйста, укажите ваше сообщение");
+      return;
+    }
+
+    // Check rate limiting
+    const rateLimitCheck = checkRateLimit();
+    if (!rateLimitCheck.allowed) {
+      showError("Упс! Что-то случилось =(", "Попробуйте попозже");
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      // Prepare form data for FormSubmit.co
-      const submitData = new FormData();
-      submitData.append("name", formData.name);
-      submitData.append("phone", formData.phone);
-      submitData.append("message", formData.message);
-      submitData.append("type", "Контактная форма");
+      const templateParams = {
+        from_name: formData.name,
+        from_phone: formData.phone,
+        message: formData.message,
+        preferred_start_date:
+          dateRange.startDate?.toLocaleDateString("ru-RU") || "Не указано",
+        preferred_end_date:
+          dateRange.endDate?.toLocaleDateString("ru-RU") || "Не указано",
+        timestamp: new Date().toLocaleString("ru-RU"),
+      };
 
-      if (dateRange.startDate) {
-        submitData.append(
-          "preferredDateStart",
-          dateRange.startDate.toLocaleDateString("ru-RU")
-        );
-      }
-      if (dateRange.endDate) {
-        submitData.append(
-          "preferredDateEnd",
-          dateRange.endDate.toLocaleDateString("ru-RU")
-        );
-      }
+      console.log("Template params:", templateParams);
 
-      submitData.append("timestamp", new Date().toLocaleString("ru-RU"));
-      submitData.append("_subject", "Новая заявка с сайта - Контакты");
-      submitData.append("_template", "table");
+      await emailjs.send(serviceId, templateId, templateParams, publicKey);
 
-      // Send to FormSubmit.co using environment variable
-      const response = await fetch(`https://formsubmit.co/${formEmail}`, {
-        method: "POST",
-        body: submitData,
-      });
-
-      if (response.ok) {
-        alert("Спасибо за обращение! Мы свяжемся с вами в ближайшее время.");
-        setFormData({ name: "", phone: "", message: "" });
-        setDateRange({ startDate: null, endDate: null });
-      } else {
-        throw new Error("Ошибка отправки формы");
-      }
+      // Show success notification with callback to reset form
+      showSuccess(
+        "Сообщение отправлено!",
+        "Спасибо за обращение! Мы свяжемся с вами в ближайшее время.",
+        () => {
+          // This callback will execute when user clicks "Понятно" button
+          setFormData({ name: "", phone: "", message: "" });
+          setDateRange({ startDate: null, endDate: null });
+        }
+      );
     } catch (error) {
       console.error("Error processing form:", error);
-      alert(
-        "Произошла ошибка при отправке заявки. Попробуйте позже или свяжитесь с нами по телефону."
-      );
+      showError("Упс! Что-то случилось =(", "Попробуйте попозже");
     } finally {
       setIsSubmitting(false);
     }
@@ -253,14 +287,26 @@ const Contact = () => {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="btn-primary w-full group inline-flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn-primary w-full group inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
+                {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                 {isSubmitting ? "Отправляем..." : "Отправить заявку"}
               </button>
             </form>
           </div>
         </div>
       </div>
+
+      {/* Notification Modal */}
+      {notification && (
+        <NotificationModal
+          isOpen={notificationOpen}
+          onClose={hideNotification}
+          type={notification.type}
+          title={notification.title}
+          message={notification.message}
+        />
+      )}
     </section>
   );
 };
